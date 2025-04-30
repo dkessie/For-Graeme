@@ -1,0 +1,671 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="initial-scale=1,maximum-scale=1,user-scalable=no" />
+  <title>Sidewalk & Trail Planning Tool</title>
+
+  <!-- ArcGIS Maps SDK for JavaScript CSS -->
+  <link rel="stylesheet" href="https://js.arcgis.com/4.29/esri/themes/light/main.css" />
+
+  <!-- Custom CSS -->
+  <style>
+    html,
+    body,
+    #viewDiv {
+      padding: 0;
+      margin: 0;
+      height: 100%;
+      width: 100%;
+      overflow: hidden; /* Prevent scrollbars */
+    }
+
+    #uiContainer {
+      position: absolute;
+      top: 15px;
+      right: 15px;
+      background-color: rgba(255, 255, 255, 0.9);
+      padding: 10px;
+      border-radius: 5px;
+      box-shadow: 0 1px 3px rgba(0,0,0,0.15);
+      max-height: 90vh;
+      overflow-y: auto;
+      width: 280px; /* Adjust width as needed */
+    }
+
+    #uiContainer h3 {
+        margin-top: 0;
+        margin-bottom: 10px;
+        font-size: 1.1em;
+        border-bottom: 1px solid #ccc;
+        padding-bottom: 5px;
+    }
+
+    .tool-button {
+      display: block;
+      width: calc(100% - 20px); /* Account for padding */
+      margin: 5px 10px;
+      padding: 8px;
+      cursor: pointer;
+      background-color: #0079c1;
+      color: white;
+      border: none;
+      border-radius: 3px;
+      text-align: center;
+      font-size: 0.95em;
+    }
+
+    .tool-button:hover {
+      background-color: #005a8e;
+    }
+
+     .tool-button.delete-button {
+        background-color: #d9534f; /* Red for delete */
+    }
+
+    .tool-button.delete-button:hover {
+        background-color: #c9302c;
+    }
+
+    .tool-button:disabled {
+        background-color: #cccccc;
+        cursor: not-allowed;
+    }
+
+    #layerListContainer {
+        margin-top: 15px;
+        border-top: 1px solid #ccc;
+        padding-top: 10px;
+    }
+
+    /* Modal Dialog Styling */
+    #attributeModal {
+      display: none; /* Hidden by default */
+      position: fixed; /* Stay in place */
+      z-index: 1000; /* Sit on top */
+      left: 0;
+      top: 0;
+      width: 100%; /* Full width */
+      height: 100%; /* Full height */
+      overflow: auto; /* Enable scroll if needed */
+      background-color: rgba(0,0,0,0.4); /* Black w/ opacity */
+    }
+
+    #modalContent {
+      background-color: #fefefe;
+      margin: 15% auto; /* 15% from the top and centered */
+      padding: 20px;
+      border: 1px solid #888;
+      width: 80%; /* Could be more or less, depending on screen size */
+      max-width: 400px;
+      border-radius: 5px;
+      box-shadow: 0 4px 8px 0 rgba(0,0,0,0.2), 0 6px 20px 0 rgba(0,0,0,0.19);
+    }
+
+     #modalContent h4 {
+        margin-top: 0;
+        color: #333;
+     }
+
+    #modalContent label {
+      display: block;
+      margin-bottom: 5px;
+      font-weight: bold;
+    }
+
+    #modalContent input[type=text], #modalContent select {
+      width: calc(100% - 22px); /* Account for padding/border */
+      padding: 10px;
+      margin-bottom: 15px;
+      border: 1px solid #ccc;
+      border-radius: 3px;
+    }
+
+    #modalButtons button {
+        padding: 10px 15px;
+        margin-right: 10px;
+        border: none;
+        border-radius: 3px;
+        cursor: pointer;
+    }
+
+    #saveButton {
+        background-color: #5cb85c; /* Green */
+        color: white;
+    }
+    #saveButton:hover {
+        background-color: #4cae4c;
+    }
+
+    #cancelButton {
+        background-color: #f0ad4e; /* Orange */
+        color: white;
+    }
+    #cancelButton:hover {
+        background-color: #eea236;
+    }
+
+    #statusMessage {
+        margin-top: 15px;
+        padding: 10px;
+        border-radius: 3px;
+        display: none; /* Hidden initially */
+        text-align: center;
+    }
+    #statusMessage.success {
+        background-color: #dff0d8;
+        color: #3c763d;
+        border: 1px solid #d6e9c6;
+    }
+    #statusMessage.error {
+        background-color: #f2dede;
+        color: #a94442;
+        border: 1px solid #ebccd1;
+    }
+    #statusMessage.info { /* Added info style */
+       background-color: #d9edf7;
+       color: #31708f;
+       border: 1px solid #bce8f1;
+    }
+
+  </style>
+
+  <!-- ArcGIS Maps SDK for JavaScript -->
+  <script src="https://js.arcgis.com/4.29/"></script>
+
+  <script>
+    require([
+      "esri/config",
+      "esri/Map",
+      "esri/views/MapView",
+      "esri/layers/TileLayer",
+      "esri/layers/MapImageLayer",
+      "esri/layers/FeatureLayer",
+      "esri/layers/GraphicsLayer",
+      "esri/widgets/LayerList",
+      "esri/widgets/Sketch/SketchViewModel",
+      "esri/Graphic",
+      "esri/geometry/SpatialReference"
+    ], function(
+      esriConfig,
+      Map,
+      MapView,
+      TileLayer,
+      MapImageLayer,
+      FeatureLayer,
+      GraphicsLayer,
+      LayerList,
+      SketchViewModel,
+      Graphic,
+      SpatialReference
+    ) {
+
+      // --- Configuration ---
+      const CONFIG = {
+        orthoBasemapUrl: "https://ajaxmaps.ajax.ca/gisbert/rest/services/Imagery/Ortho2024/MapServer",
+        referenceMapServerUrl: "https://ajaxmaps.ajax.ca/gisernie/rest/services/Testing/Ticket_11656_Add_Future_Sidewalks/MapServer",
+        editableFeatureServiceUrl: "https://services.arcgis.com/JVGQYTTiP6CrfEsw/arcgis/rest/services/Add_Sidewalks_and_Trails/FeatureServer", // Assuming layer index 0
+        // initialZoom is now less important as we zoom to extent, but keep as fallback
+        initialZoom: 14,
+        // initialCenter is also less important
+        // initialCenter: [650000, 4860000],
+        mapRotation: 18.5, // Rotation to apply to the view
+        mapSpatialReferenceWkid: 26917, // NAD 1983 UTM Zone 17N
+        editableLayerFields: {
+            type: "Type",
+            description: "Description",
+            date: "Date"
+        }
+      };
+
+      // --- Layers ---
+
+      // 1. Ortho Layer (Treated as an operational layer)
+      const orthoLayer = new TileLayer({
+        url: CONFIG.orthoBasemapUrl,
+        title: "Ortho Imagery 2024" // This title will appear in LayerList
+      });
+
+      // 2. Reference Layers
+      const referenceLayer = new MapImageLayer({
+        url: CONFIG.referenceMapServerUrl,
+        title: "Reference Layers",
+        sublayers: [
+          { id: 14, visible: true, title: "Recreational Trails" },
+          { id: 13, visible: true, title: "Sidewalks" },
+          { id: 15, visible: false, title: "Addresses" },
+          { id: 16, visible: true, title: "Assessment Parcels" },
+          { id: 17, visible: false, title: "Ajax SLRN" },
+          { id: 18, visible: true, title: "Ajax Border" },
+          { id: 19, visible: true, title: "CN Rail" },
+          { id: 20, visible: true, title: "CP Rail" },
+          { id: 21, visible: false, title: "Water Line" }
+        ]
+      });
+
+      // 3. Editable Feature Layer
+      const editableLineLayer = new FeatureLayer({
+        url: CONFIG.editableFeatureServiceUrl,
+        title: "Proposed Sidewalks/Trails",
+        outFields: ["*", CONFIG.editableLayerFields.type, CONFIG.editableLayerFields.description, CONFIG.editableLayerFields.date], // Ensure fields are listed
+         renderer: {
+            type: "unique-value",
+            field: CONFIG.editableLayerFields.type,
+            defaultSymbol: { type: "simple-line", color: "grey", width: "2px" },
+            uniqueValueInfos: [{
+                value: "Sidewalk",
+                symbol: { type: "simple-line", color: "cyan", width: "3px" },
+                label: "Proposed Sidewalk"
+            }, {
+                value: "Trail",
+                symbol: { type: "simple-line", color: "orange", width: "3px", style: "dash" },
+                label: "Proposed Trail"
+            }]
+        },
+        popupTemplate: {
+            title: "Proposed Feature",
+            content: [
+                { type: "fields", fieldInfos: [
+                    { fieldName: CONFIG.editableLayerFields.type, label: "Type" },
+                    { fieldName: CONFIG.editableLayerFields.description, label: "Description" },
+                    { fieldName: CONFIG.editableLayerFields.date, label: "Date Added", format: { dateFormat: "short-date-short-time"} }
+                 ]}
+            ]
+        }
+      });
+
+      // Temporary Graphics Layer for Sketching
+      const tempGraphicsLayer = new GraphicsLayer({
+        title: "Sketch Layer",
+        listMode: "hide" // Keep hidden from LayerList
+      });
+
+      // --- Map and View ---
+      const map = new Map({
+        // NO basemap property - orthoLayer will act as the visual base
+        // Layers are drawn in the order they appear here
+        layers: [orthoLayer, referenceLayer, editableLineLayer, tempGraphicsLayer]
+      });
+
+      const view = new MapView({
+        container: "viewDiv",
+        map: map,
+        // zoom and center will be set dynamically based on orthoLayer extent
+        rotation: CONFIG.mapRotation, // Apply the required rotation
+        spatialReference: { // Define the view's spatial reference
+             wkid: CONFIG.mapSpatialReferenceWkid
+        },
+        constraints: {
+          snapToZoom: false,
+          rotationEnabled: true
+        },
+        popup: {
+          dockEnabled: true,
+          dockOptions: {
+            position: "top-right",
+            breakpoint: false
+          },
+          highlightEnabled: true,
+          autoOpenEnabled: false
+        },
+        highlightOptions: {
+            color: [255, 255, 0, 1],
+            haloOpacity: 0.9,
+            fillOpacity: 0.2
+        },
+        ui: {
+          components: ["attribution", "zoom"]
+        }
+      });
+
+      // --- UI Elements ---
+      const drawSidewalkButton = document.getElementById("drawSidewalkBtn");
+      const drawTrailButton = document.getElementById("drawTrailBtn");
+      const deleteButton = document.getElementById("deleteBtn");
+      const attributeModal = document.getElementById("attributeModal");
+      const modalContent = document.getElementById("modalContent");
+      const typeInput = document.getElementById("typeInput");
+      const descriptionInput = document.getElementById("descriptionInput");
+      const saveButton = document.getElementById("saveButton");
+      const cancelButton = document.getElementById("cancelButton");
+      const statusMessage = document.getElementById("statusMessage");
+
+      // Add UI container to the view
+      view.ui.add("uiContainer", "top-right");
+
+      // --- Sketch View Model Setup ---
+      const sketchViewModel = new SketchViewModel({
+        view: view,
+        layer: tempGraphicsLayer,
+        polylineSymbol: {
+          type: "simple-line",
+          color: [0, 0, 200, 0.7],
+          width: 3
+        },
+         defaultCreateOptions: {
+            mode: "click"
+        },
+        // Optional: Customize update symbol
+        // defaultUpdateOptions: { tool: "reshape" }
+      });
+
+      // --- Global State Variables ---
+      let currentSketchGraphic = null;
+      let currentSketchType = null;
+      let selectedFeature = null;
+      let highlightHandle = null;
+
+      // --- Event Listeners and Logic ---
+
+      drawSidewalkButton.onclick = () => startDrawing("Sidewalk");
+      drawTrailButton.onclick = () => startDrawing("Trail");
+
+      function startDrawing(type) {
+          clearSelection();
+          currentSketchType = type;
+          sketchViewModel.create("polyline");
+          setStatus(`Drawing ${type}... Click map to add points, double-click to finish.`, "info");
+          drawSidewalkButton.disabled = true;
+          drawTrailButton.disabled = true;
+          deleteButton.disabled = true;
+      }
+
+      sketchViewModel.on("create", (event) => {
+        if (event.state === "complete") {
+          currentSketchGraphic = event.graphic;
+          showAttributeModal(currentSketchType);
+          setStatus(""); // Clear drawing status
+        } else if (event.state === "cancel") {
+             resetUIState();
+             setStatus("Drawing cancelled.");
+             setTimeout(clearStatus, 3000);
+        }
+      });
+
+      function showAttributeModal(type) {
+        typeInput.value = type;
+        descriptionInput.value = "";
+        attributeModal.style.display = "block";
+        descriptionInput.focus();
+      }
+
+      function hideAttributeModal() {
+        attributeModal.style.display = "none";
+      }
+
+      saveButton.onclick = () => {
+        if (!currentSketchGraphic) return;
+
+        const attributes = {};
+        // Ensure field names EXACTLY match the CONFIG
+        attributes[CONFIG.editableLayerFields.type] = typeInput.value;
+        attributes[CONFIG.editableLayerFields.description] = descriptionInput.value.trim() || null;
+        attributes[CONFIG.editableLayerFields.date] = new Date(); // Use server's date if possible via editor tracking
+
+        const featureToAdd = new Graphic({
+            geometry: currentSketchGraphic.geometry,
+            attributes: attributes
+        });
+
+        applyEditsToLayer({ addFeatures: [featureToAdd] });
+        hideAttributeModal();
+      };
+
+      cancelButton.onclick = () => {
+        hideAttributeModal();
+        tempGraphicsLayer.remove(currentSketchGraphic);
+        resetUIState();
+        setStatus("Feature creation cancelled.");
+        setTimeout(clearStatus, 3000);
+      };
+
+      function applyEditsToLayer(edits) {
+          setStatus("Applying edits...", "info"); // Indicate processing
+          editableLineLayer.applyEdits(edits)
+              .then((editResults) => {
+                  console.log("Edits applied:", editResults);
+                  if (edits.addFeatures && editResults.addFeatureResults.length > 0 && !editResults.addFeatureResults[0].error) {
+                      setStatus("Feature saved successfully!", "success");
+                  } else if (edits.deleteFeatures && editResults.deleteFeatureResults.length > 0 && !editResults.deleteFeatureResults[0].error) {
+                       setStatus("Feature deleted successfully!", "success");
+                       clearSelection(); // Crucial after successful delete
+                   } else if (editResults.addFeatureResults?.[0]?.error || editResults.deleteFeatureResults?.[0]?.error) {
+                      const error = editResults.addFeatureResults?.[0]?.error || editResults.deleteFeatureResults?.[0]?.error;
+                      console.error("Error applying edits:", error);
+                      setStatus(`Error saving feature: ${error.message}`, "error");
+                  } else {
+                      // Catch case where results array is empty or has no error object
+                      setStatus("Edit operation completed, but status uncertain.", "info");
+                  }
+                   resetUIState();
+                   setTimeout(clearStatus, 5000);
+              })
+              .catch((error) => {
+                  console.error("Error during applyEdits call: ", error);
+                  setStatus(`Error applying edits: ${error.message}`, "error");
+                  resetUIState();
+                  setTimeout(clearStatus, 5000);
+              });
+      }
+
+      function resetUIState() {
+          sketchViewModel.cancel();
+          tempGraphicsLayer.removeAll();
+          currentSketchGraphic = null;
+          currentSketchType = null;
+          // Only re-enable draw buttons if no feature is selected
+          if (!selectedFeature) {
+             drawSidewalkButton.disabled = false;
+             drawTrailButton.disabled = false;
+             deleteButton.disabled = true;
+          } else {
+             // If a feature IS selected, keep draw buttons disabled
+             drawSidewalkButton.disabled = true;
+             drawTrailButton.disabled = true;
+             deleteButton.disabled = false; // Ensure delete stays enabled if selected
+          }
+      }
+
+      // --- Selection and Deletion Logic ---
+
+      view.on("click", (event) => {
+        if (sketchViewModel.state === "active" || sketchViewModel.activeTool) { // Check activeTool as well
+            // Don't select features while actively sketching or reshaping
+            return;
+        }
+
+        view.hitTest(event).then((response) => {
+          const results = response.results;
+          const editableLayerHit = results.find(result => result.graphic?.layer === editableLineLayer); // Safer check for graphic
+
+          if (editableLayerHit) {
+             const feature = editableLayerHit.graphic;
+             // Use OBJECTID which should always be present for FeatureLayer features
+             const hitObjectId = feature.attributes.OBJECTID;
+             const selectedObjectId = selectedFeature?.attributes.OBJECTID;
+
+             if (selectedFeature && selectedObjectId === hitObjectId) {
+                 clearSelection();
+             } else {
+                 selectFeature(feature);
+             }
+          } else {
+             // Clicked empty space, only clear if not actively sketching
+             if (sketchViewModel.state !== "active" && !sketchViewModel.activeTool) {
+                 clearSelection();
+             }
+          }
+        });
+      });
+
+      function selectFeature(feature) {
+         clearSelection(); // Clear previous first
+
+         selectedFeature = feature;
+
+         view.whenLayerView(editableLineLayer).then((layerView) => {
+             highlightHandle = layerView.highlight(selectedFeature);
+         });
+
+         deleteButton.disabled = false; // Enable delete
+         drawSidewalkButton.disabled = true; // Disable draw
+         drawTrailButton.disabled = true; // Disable draw
+
+         setStatus("Feature selected. Click 'Delete Selected' to remove.", "info");
+      }
+
+      function clearSelection() {
+          if (highlightHandle) {
+              highlightHandle.remove();
+              highlightHandle = null;
+          }
+          selectedFeature = null;
+          deleteButton.disabled = true; // Disable delete
+
+          // Re-enable draw buttons only if sketch is not active
+          if (sketchViewModel.state !== "active" && !sketchViewModel.activeTool) {
+             drawSidewalkButton.disabled = false;
+             drawTrailButton.disabled = false;
+          }
+          clearStatus();
+      }
+
+      deleteButton.onclick = () => {
+        if (selectedFeature) {
+            if (confirm("Are you sure you want to delete the selected feature? This action cannot be undone.")) {
+                const objectIdToDelete = selectedFeature.attributes.OBJECTID;
+                // Create the deletion edit object using the graphic's OBJECTID
+                applyEditsToLayer({ deleteFeatures: [{ objectId: objectIdToDelete }] });
+                // Don't clear selection here; let applyEditsToLayer handle it on success
+            }
+        } else {
+          setStatus("No feature selected to delete.", "error");
+          setTimeout(clearStatus, 3000);
+        }
+      };
+
+
+      // --- Layer List Widget ---
+      const layerList = new LayerList({
+        view: view,
+        container: "layerListContainer",
+         listItemCreatedFunction: function(event) {
+            const item = event.item;
+            // Hide the sketch layer
+            if (item.layer === tempGraphicsLayer) {
+                item.listItem.hidden = true; // Better way to hide from list
+            }
+            // Optional: Move ortho layer to bottom visually in the list
+             if (item.layer === orthoLayer) {
+                 // This moves the DOM element, might be slightly brittle if LayerList structure changes
+                 // item.listItem.parentElement.appendChild(item.listItem);
+                 item.panelOpen = false; // Start collapsed if desired
+             }
+             // Prevent toggling the Proposed layer visibility (optional)
+             // if (item.layer === editableLineLayer) {
+             //    const checkbox = item.listItem.querySelector("input[type=checkbox]");
+             //    if(checkbox) checkbox.disabled = true;
+             // }
+        }
+      });
+
+
+       // --- Helper Functions for Status Messages ---
+      function setStatus(message, type = "info") {
+        statusMessage.textContent = message;
+        statusMessage.className = `status-message ${type}`; // Reset classes and add type
+        statusMessage.style.display = "block";
+        // console.log(`Status [${type}]: ${message}`); // Log status for debugging
+      }
+
+      function clearStatus() {
+        statusMessage.textContent = "";
+        statusMessage.style.display = "none";
+      }
+
+      // --- Initial Setup ---
+      view.when(() => {
+        console.log("MapView ready.");
+        setStatus("Map view ready. Loading layers...", "info");
+
+        // **MODIFICATION: Wait for ortho layer and set initial extent**
+        orthoLayer.when(() => {
+          if (orthoLayer.fullExtent) {
+            console.log("Setting initial extent to ortho layer's full extent.");
+            view.goTo(orthoLayer.fullExtent)
+              .then(() => {
+                console.log("Initial extent set.");
+                // The rotation is already set on the view, goTo should preserve it.
+                // If it doesn't, uncomment the line below:
+                // view.rotation = CONFIG.mapRotation;
+                setStatus("Ready.", "success"); // Update status after zoom
+                setTimeout(clearStatus, 3000);
+              })
+              .catch((error) => {
+                console.error("Error going to initial extent: ", error);
+                setStatus("Error setting initial map extent.", "error");
+                // Fallback if goTo fails
+                view.zoom = CONFIG.initialZoom;
+              });
+          } else {
+            console.warn("Ortho layer loaded but fullExtent is not available. Using default zoom/center.");
+            setStatus("Could not get ortho extent, using default view.", "error");
+             // Fallback to default zoom/center if extent is missing
+             // You might want to define a default center in CONFIG if this happens often
+             view.zoom = CONFIG.initialZoom;
+             // if (CONFIG.initialCenter) view.center = CONFIG.initialCenter;
+          }
+        }).catch(error => {
+           console.error("Ortho layer failed to load: ", error);
+           setStatus("Error loading base ortho layer.", "error");
+        });
+
+        deleteButton.disabled = true; // Ensure delete is disabled initially
+      }).catch(error => {
+          console.error("MapView failed to load: ", error);
+          setStatus("Fatal error: MapView failed to load.", "error");
+      });
+
+    });
+  </script>
+
+</head>
+<body>
+  <!-- Map Container -->
+  <div id="viewDiv"></div>
+
+  <!-- UI Container -->
+  <div id="uiContainer">
+    <h3>Planning Tools</h3>
+    <button id="drawSidewalkBtn" class="tool-button">Draw Proposed Sidewalk</button>
+    <button id="drawTrailBtn" class="tool-button">Draw Proposed Trail</button>
+    <button id="deleteBtn" class="tool-button delete-button" disabled>Delete Selected Feature</button>
+    <!-- Status Message Area -->
+    <div id="statusMessage"></div>
+    <!-- Layer List -->
+    <div id="layerListContainer">
+       <!-- LayerList widget will be placed here by JS -->
+    </div>
+  </div>
+
+  <!-- Attribute Input Modal -->
+  <div id="attributeModal">
+    <div id="modalContent">
+      <h4>Add Feature Details</h4>
+      <label for="typeInput">Type:</label>
+      <input type="text" id="typeInput" name="type" readonly /> <!-- Readonly, set by button click -->
+
+      <label for="descriptionInput">Description (Optional):</label>
+      <input type="text" id="descriptionInput" name="description" placeholder="Enter description..."/>
+
+      <p>A new feature will be added. The current date will be recorded automatically.</p>
+
+      <div id="modalButtons">
+        <button id="saveButton">Save Feature</button>
+        <button id="cancelButton">Cancel</button>
+      </div>
+    </div>
+  </div>
+
+</body>
+</html>
